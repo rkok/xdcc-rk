@@ -34,8 +34,8 @@ class XdccCli {
   private resolveBinaryPath(): string {
     let xdccPath = process.env.XDCC_PATH;
     if (!xdccPath) {
-      // Default: <webdir>/../bin/xdcc
-      xdccPath = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'bin', 'xdcc');
+      // Default: <webdir>/../bin/xdcc (from dist/server/XdccCli.js -> ../../bin/xdcc)
+      xdccPath = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'bin', 'xdcc');
     }
     return xdccPath;
   }
@@ -47,8 +47,8 @@ class XdccCli {
   private resolveDownloadsPath(): string {
     let downloadsPath = process.env.XDCC_DOWNLOADS_PATH;
     if (!downloadsPath) {
-      // Default: <webdir>/downloads
-      downloadsPath = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'downloads');
+      // Default: <webdir>/downloads (from dist/server/XdccCli.js -> ../../downloads)
+      downloadsPath = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', 'downloads');
     }
     return downloadsPath;
   }

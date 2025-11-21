@@ -1,4 +1,6 @@
 import express from 'express';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import XdccCli from './XdccCli.js';
 
 async function startServer() {
@@ -8,22 +10,19 @@ async function startServer() {
   const app = express();
   const port = 3000;
 
-  app.set('view engine', 'ejs');
-  app.set('views', './views');
-
   app.use(express.json());
-  app.use(express.static('public'));
 
-  app.get('/', (req, res) => {
-    res.render('index', { title: 'XDCC CLI' });
-  });
+  // Serve static files from the built React app (in production)
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const publicPath = join(__dirname, '..', 'public');
+  app.use(express.static(publicPath));
 
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok' });
   });
 
   app.get('/api/search', async (req, res) => {
-    const searchString = req.query.searchString;
+    const searchString = req.query.q;
 
     if (!searchString || typeof searchString !== 'string') {
       res.status(400).json({ error: 'searchString query parameter is required' });
@@ -90,6 +89,11 @@ async function startServer() {
         child.kill();
       }
     });
+  });
+
+  // SPA fallback - serve index.html for all other routes (must be last)
+  app.get('*', (req, res) => {
+    res.sendFile(join(publicPath, 'index.html'));
   });
 
   app.listen(port, () => {
