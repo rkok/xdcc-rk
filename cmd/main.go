@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -51,10 +52,41 @@ func formatSize(size int64) string {
 	return FloatToString(float64(size)) + "B"
 }
 
+type JSONSearchResult struct {
+	FileName string  `json:"fileName"`
+	Size     float64 `json:"size"`
+	URL      string  `json:"url"`
+}
+
+type JSONSearchOutput struct {
+	Results []JSONSearchResult `json:"results"`
+}
+
+func outputSearchResultsJSON(results []search.XdccFileInfo) {
+	jsonResults := make([]JSONSearchResult, 0, len(results))
+	for _, fileInfo := range results {
+		sizeInKB := float64(fileInfo.Size) / float64(search.KiloByte)
+		jsonResults = append(jsonResults, JSONSearchResult{
+			FileName: fileInfo.Name,
+			Size:     sizeInKB,
+			URL:      fileInfo.URL.String(),
+		})
+	}
+
+	output := JSONSearchOutput{Results: jsonResults}
+	jsonBytes, err := json.Marshal(output)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error formatting JSON: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println(string(jsonBytes))
+}
+
 func execSearch(args []string) {
 	searchCmd := flag.NewFlagSet("search", flag.ExitOnError)
 	sortByFilename := searchCmd.Bool("s", false, "sort results by filename")
 	proxyURL := searchCmd.String("proxy", "", "SOCKS5 proxy URL (e.g., socks5://localhost:1080)")
+	format := searchCmd.String("format", "table", "output format (table, json)")
 
 	args = parseFlags(searchCmd, args)
 
@@ -63,15 +95,23 @@ func execSearch(args []string) {
 		log.Fatalf("Failed to initialize proxy: %v\n", err)
 	}
 
-	printer := table.NewTablePrinter([]string{"File Name", "Size", "URL"})
-	printer.SetMaxWidths(defaultColWidths)
-
 	if len(args) < 1 {
 		fmt.Println("search: no keyword provided.")
 		os.Exit(1)
 	}
 
 	res, _ := searchEngine.Search(args)
+
+	// Handle output format
+	if *format == "json" {
+		outputSearchResultsJSON(res)
+		return
+	}
+
+	// Table output (default)
+	printer := table.NewTablePrinter([]string{"File Name", "Size", "URL"})
+	printer.SetMaxWidths(defaultColWidths)
+
 	for _, fileInfo := range res {
 		printer.AddRow(table.Row{fileInfo.Name, formatSize(fileInfo.Size), fileInfo.URL.String()})
 	}
