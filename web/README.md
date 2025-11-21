@@ -61,6 +61,13 @@ This creates:
 - `dist/server/` - Compiled Express server
 - `dist/public/` - Built React app (static files)
 
+For reverse-proxied deployments, set the `VITE_BASENAME`
+environment variable before building:
+
+```bash
+VITE_BASENAME=/xdcc/ npm run build
+```
+
 ## Running in Production
 
 ```bash

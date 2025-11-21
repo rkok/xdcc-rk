@@ -69,7 +69,7 @@ const Xdcc = ({}: XdccProps) => {
     setError(null);
 
     try {
-      const response = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`);
+      const response = await fetch(`api/search?q=${encodeURIComponent(searchQuery)}`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -97,7 +97,7 @@ const Xdcc = ({}: XdccProps) => {
       [url]: { status: 'Starting...', errors: [] }
     }));
 
-    const eventSource = new EventSource(`/api/download?url=${encodeURIComponent(url)}`);
+    const eventSource = new EventSource(`api/download?url=${encodeURIComponent(url)}`);
 
     // Store the EventSource reference so we can cancel it later
     setEventSources(prev => ({

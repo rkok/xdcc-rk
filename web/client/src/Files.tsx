@@ -33,7 +33,7 @@ const Files = ({}: FilesProps) => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch('/api/files/list');
+      const response = await fetch('api/files/list');
       if (!response.ok) {
         throw new Error(`Failed to fetch files: ${response.statusText}`);
       }
@@ -53,7 +53,7 @@ const Files = ({}: FilesProps) => {
 
   const handleDownload = (filename: string) => {
     // Create a temporary anchor element to trigger download
-    const url = `/api/files/download?file=${encodeURIComponent(filename)}`;
+    const url = `api/files/download?file=${encodeURIComponent(filename)}`;
     const a = document.createElement('a');
     a.href = url;
     a.download = filename;
@@ -68,7 +68,7 @@ const Files = ({}: FilesProps) => {
     }
 
     try {
-      const response = await fetch('/api/files/delete', {
+      const response = await fetch('api/files/delete', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
