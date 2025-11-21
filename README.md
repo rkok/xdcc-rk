@@ -8,10 +8,13 @@
 
 # XDCC Command Line Tools
 
-This project provides a simple command line tool which allow you to perform search and retrieval of files on the IRC network through the XDCC protocol. It is based on the popular [goirc](https://github.com/fluffle/goirc) library.
-
+Fork of ostafen's wonderful [xdcc-cli](https://github.com/ostafen/xdcc-cli) with some mostly vibe-coded improvements:
+- SOCKS5 proxy support
+- Parseable output formats for `xdcc search` and `xdcc get`
+- Web interface for searching, downloading and managing files
 
 ## Features
+
 - File search from multiple search engines.
 - It allows to download multiple files at the same time.
 
