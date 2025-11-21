@@ -2,10 +2,13 @@ import express from 'express';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import XdccCli from './XdccCli.js';
+import FileManager from './FileManager.js';
 
 async function startServer() {
   const xdccCli = new XdccCli();
   await xdccCli.initialize();
+
+  const fileManager = new FileManager(xdccCli.resolveDownloadsPath());
 
   const app = express();
   const port = 3000;
@@ -89,6 +92,75 @@ async function startServer() {
         child.kill();
       }
     });
+  });
+
+  // File management endpoints
+  app.get('/api/files/list', async (req, res) => {
+    try {
+      const files = await fileManager.listFiles();
+      res.json(files);
+    } catch (error) {
+      console.error('List files error:', error);
+      res.status(500).json({ error: 'Failed to list files', details: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
+  app.post('/api/files/delete', async (req, res) => {
+    const { filename } = req.body;
+
+    if (!filename || typeof filename !== 'string') {
+      res.status(400).json({ error: 'filename is required in request body' });
+      return;
+    }
+
+    try {
+      await fileManager.deleteFile(filename);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Delete file error:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Return 404 for file not found, 400 for validation errors, 500 for other errors
+      if (errorMessage.includes('ENOENT') || errorMessage.includes('Not a file')) {
+        res.status(404).json({ error: 'File not found' });
+      } else if (errorMessage.includes('cannot') || errorMessage.includes('Invalid')) {
+        res.status(400).json({ error: errorMessage });
+      } else {
+        res.status(500).json({ error: 'Failed to delete file', details: errorMessage });
+      }
+    }
+  });
+
+  app.get('/api/files/download', async (req, res) => {
+    const filename = req.query.file;
+
+    if (!filename || typeof filename !== 'string') {
+      res.status(400).json({ error: 'file query parameter is required' });
+      return;
+    }
+
+    try {
+      const filePath = fileManager.getFilePath(filename);
+
+      // Use Express's res.download() for secure file streaming
+      res.download(filePath, filename, (err) => {
+        if (err) {
+          console.error('Download file error:', err);
+          if (!res.headersSent) {
+            res.status(404).json({ error: 'File not found' });
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Get file path error:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      if (errorMessage.includes('cannot') || errorMessage.includes('Invalid')) {
+        res.status(400).json({ error: errorMessage });
+      } else {
+        res.status(500).json({ error: 'Failed to download file', details: errorMessage });
+      }
+    }
   });
 
   // SPA fallback - serve index.html for all other routes (must be last)

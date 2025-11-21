@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev:server": "cd server &&  nodemon -w src --exec sh -c \"tsc && node ../dist/server/index.js\"",
+    "dev:server": "cd server && nodemon -w src -e ts --exec sh -c \"tsc && node ../dist/server/index.js\"",
     "dev:client": "cd client && vite",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "build:server": "cd server && tsc",

@@ -44,7 +44,7 @@ class XdccCli {
    * Resolves the path to the downloads directory.
    * Checks XDCC_DOWNLOADS_PATH environment variable first, otherwise uses default path.
    */
-  private resolveDownloadsPath(): string {
+  resolveDownloadsPath(): string {
     let downloadsPath = process.env.XDCC_DOWNLOADS_PATH;
     if (!downloadsPath) {
       // Default: <webdir>/downloads (from dist/server/XdccCli.js -> ../../downloads)
