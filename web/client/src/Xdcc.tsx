@@ -1,4 +1,7 @@
 import { useState, FormEvent } from 'react';
+import { useSortableData } from './utils/useSortableData';
+import { SortIcon } from './utils/SortIcon';
+import './styles/table-sort.css';
 
 type XdccProps = {}
 
@@ -6,6 +9,7 @@ type SearchResult = {
   fileName: string;
   size: number;
   url: string;
+  server?: string; // Computed from URL
 }
 
 type SearchResponse = {
@@ -54,6 +58,11 @@ const Xdcc = ({}: XdccProps) => {
   const [downloads, setDownloads] = useState<Record<string, DownloadState>>({});
   const [eventSources, setEventSources] = useState<Record<string, EventSource>>({});
 
+  // Sorting for search results
+  const { items: sortedResults, requestSort, sortConfig } = useSortableData<SearchResult>(
+    searchResults?.results || []
+  );
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -65,6 +74,13 @@ const Xdcc = ({}: XdccProps) => {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       const data = await response.json();
+      // Add computed server property to each result
+      if (data.results) {
+        data.results = data.results.map((result: SearchResult) => ({
+          ...result,
+          server: extractHostname(result.url)
+        }));
+      }
       setSearchResults(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
@@ -217,22 +233,39 @@ const Xdcc = ({}: XdccProps) => {
           <table>
             <thead>
               <tr>
-                <th>File Name</th>
-                <th>Size</th>
-                <th>Server</th>
+                <th
+                  className="sortable"
+                  onClick={() => requestSort('fileName')}
+                >
+                  File Name
+                  <SortIcon direction={sortConfig?.key === 'fileName' ? sortConfig.direction : null} />
+                </th>
+                <th
+                  className="sortable"
+                  onClick={() => requestSort('size')}
+                >
+                  Size
+                  <SortIcon direction={sortConfig?.key === 'size' ? sortConfig.direction : null} />
+                </th>
+                <th
+                  className="sortable"
+                  onClick={() => requestSort('server')}
+                >
+                  Server
+                  <SortIcon direction={sortConfig?.key === 'server' ? sortConfig.direction : null} />
+                </th>
                 <th>Action</th>
               </tr>
             </thead>
             <tbody>
-              {searchResults.results.map((result, index) => {
+              {sortedResults.map((result, index) => {
                 const downloadState = downloads[result.url];
                 const isDownloading = eventSources[result.url] !== undefined;
-                const hostname = extractHostname(result.url);
                 return (
                   <tr key={index}>
                     <td title={result.url}>{result.fileName}</td>
                     <td title={result.url}>{formatFileSize(result.size)}</td>
-                    <td title={result.url}>{hostname}</td>
+                    <td title={result.url}>{result.server}</td>
                     <td>
                       {downloadState ? (
                         <div>

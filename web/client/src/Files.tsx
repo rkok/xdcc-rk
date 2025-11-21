@@ -1,4 +1,7 @@
 import { useEffect, useState } from 'react';
+import { useSortableData } from './utils/useSortableData';
+import { SortIcon } from './utils/SortIcon';
+import './styles/table-sort.css';
 
 interface FileInfo {
   name: string;
@@ -22,6 +25,9 @@ const Files = ({}: FilesProps) => {
   const [diskSpace, setDiskSpace] = useState<DiskSpace | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Sorting for files
+  const { items: sortedFiles, requestSort, sortConfig } = useSortableData<FileInfo>(files);
 
   const fetchFiles = async () => {
     setLoading(true);
@@ -124,13 +130,25 @@ const Files = ({}: FilesProps) => {
         <table>
           <thead>
             <tr>
-              <th>Filename</th>
-              <th>Size</th>
+              <th
+                className="sortable"
+                onClick={() => requestSort('name')}
+              >
+                Filename
+                <SortIcon direction={sortConfig?.key === 'name' ? sortConfig.direction : null} />
+              </th>
+              <th
+                className="sortable"
+                onClick={() => requestSort('size')}
+              >
+                Size
+                <SortIcon direction={sortConfig?.key === 'size' ? sortConfig.direction : null} />
+              </th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {files.map((file) => (
+            {sortedFiles.map((file) => (
               <tr key={file.name}>
                 <td>{file.name}</td>
                 <td>{formatFileSize(file.size)}</td>
