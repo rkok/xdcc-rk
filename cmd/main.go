@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -11,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"xdcc-cli/pb"
+	"xdcc-cli/cmd/output"
 	"xdcc-cli/proxy"
 	"xdcc-cli/search"
 	table "xdcc-cli/table"
@@ -51,10 +52,41 @@ func formatSize(size int64) string {
 	return FloatToString(float64(size)) + "B"
 }
 
+type JSONSearchResult struct {
+	FileName string  `json:"fileName"`
+	Size     float64 `json:"size"`
+	URL      string  `json:"url"`
+}
+
+type JSONSearchOutput struct {
+	Results []JSONSearchResult `json:"results"`
+}
+
+func outputSearchResultsJSON(results []search.XdccFileInfo) {
+	jsonResults := make([]JSONSearchResult, 0, len(results))
+	for _, fileInfo := range results {
+		sizeInKB := float64(fileInfo.Size) / float64(search.KiloByte)
+		jsonResults = append(jsonResults, JSONSearchResult{
+			FileName: fileInfo.Name,
+			Size:     sizeInKB,
+			URL:      fileInfo.URL.String(),
+		})
+	}
+
+	output := JSONSearchOutput{Results: jsonResults}
+	jsonBytes, err := json.Marshal(output)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error formatting JSON: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Println(string(jsonBytes))
+}
+
 func execSearch(args []string) {
 	searchCmd := flag.NewFlagSet("search", flag.ExitOnError)
 	sortByFilename := searchCmd.Bool("s", false, "sort results by filename")
 	proxyURL := searchCmd.String("proxy", "", "SOCKS5 proxy URL (e.g., socks5://localhost:1080)")
+	format := searchCmd.String("format", "table", "output format (table, json)")
 
 	args = parseFlags(searchCmd, args)
 
@@ -63,15 +95,23 @@ func execSearch(args []string) {
 		log.Fatalf("Failed to initialize proxy: %v\n", err)
 	}
 
-	printer := table.NewTablePrinter([]string{"File Name", "Size", "URL"})
-	printer.SetMaxWidths(defaultColWidths)
-
 	if len(args) < 1 {
 		fmt.Println("search: no keyword provided.")
 		os.Exit(1)
 	}
 
 	res, _ := searchEngine.Search(args)
+
+	// Handle output format
+	if *format == "json" {
+		outputSearchResultsJSON(res)
+		return
+	}
+
+	// Table output (default)
+	printer := table.NewTablePrinter([]string{"File Name", "Size", "URL"})
+	printer.SetMaxWidths(defaultColWidths)
+
 	for _, fileInfo := range res {
 		printer.AddRow(table.Row{fileInfo.Name, formatSize(fileInfo.Size), fileInfo.URL.String()})
 	}
@@ -85,26 +125,42 @@ func execSearch(args []string) {
 	printer.Print()
 }
 
-func transferLoop(transfer xdcc.Transfer) {
-	bar := pb.NewProgressBar()
-
+// transferLoop runs the main event loop for a transfer using the provided formatter
+func transferLoop(transfer xdcc.Transfer, formatter output.TransferOutputFormatter) bool {
 	evts := transfer.PollEvents()
-	quit := false
-	for !quit {
+	var totalBytes uint64
+
+	for {
 		e := <-evts
-		switch evtType := e.(type) {
+		switch evt := e.(type) {
+		case *xdcc.TransferConnectingEvent:
+			formatter.OnConnecting(evt)
+
+		case *xdcc.TransferConnectedEvent:
+			formatter.OnConnected(evt)
+
 		case *xdcc.TransferStartedEvent:
-			bar.SetTotal(int(evtType.FileSize))
-			bar.SetFileName(evtType.FileName)
-			bar.SetState(pb.ProgressStateDownloading)
+			totalBytes = evt.FileSize
+			formatter.OnStarted(evt)
+
 		case *xdcc.TransferProgessEvent:
-			bar.Increment(int(evtType.TransferBytes))
+			formatter.OnProgress(evt, totalBytes)
+
 		case *xdcc.TransferCompletedEvent:
-			bar.SetState(pb.ProgressStateCompleted)
-			quit = true
+			formatter.OnCompleted(evt)
+			return true
+
+		case *xdcc.TransferErrorEvent:
+			formatter.OnError(evt)
+
+		case *xdcc.TransferAbortedEvent:
+			formatter.OnAborted(evt)
+			return false
+
+		case *xdcc.TransferRetryEvent:
+			formatter.OnRetry(evt)
 		}
 	}
-	// TODO: do clean-up operations here
 }
 
 func suggestUnknownAuthoritySwitch(err error) {
@@ -113,15 +169,54 @@ func suggestUnknownAuthoritySwitch(err error) {
 	}
 }
 
-func doTransfer(transfer xdcc.Transfer) {
+func doTransfer(transfer xdcc.Transfer, format string, urlStr string) bool {
+	// Create the appropriate formatter based on format
+	var formatter output.TransferOutputFormatter
+	if format == "jsonl" {
+		formatter = output.NewJSONLFormatter(urlStr)
+	} else {
+		formatter = output.NewCLIFormatter()
+	}
+
+	// For JSONL, start event loop in goroutine before calling Start()
+	// so we can capture connecting event
+	if format == "jsonl" {
+		resultChan := make(chan bool, 1)
+		errChan := make(chan error, 1)
+
+		go func() {
+			resultChan <- transferLoop(transfer, formatter)
+		}()
+
+		go func() {
+			errChan <- transfer.Start()
+		}()
+
+		err := <-errChan
+		if err != nil {
+			// Emit error using JSONL formatter
+			jsonlFormatter := formatter.(*output.JSONLFormatter)
+			jsonlFormatter.OnError(&xdcc.TransferErrorEvent{
+				URL:       urlStr,
+				Error:     err.Error(),
+				ErrorType: "network",
+				Fatal:     true,
+			})
+			return false
+		}
+
+		return <-resultChan
+	}
+
+	// For CLI format, start transfer first
 	err := transfer.Start()
 	if err != nil {
 		fmt.Println(err)
 		suggestUnknownAuthoritySwitch(err)
-		return
+		return false
 	}
 
-	transferLoop(transfer)
+	return transferLoop(transfer, formatter)
 }
 
 func parseFlags(flagSet *flag.FlagSet, args []string) []string {
@@ -171,11 +266,18 @@ func printGetUsageAndExit(flagSet *flag.FlagSet) {
 	os.Exit(0)
 }
 
+// emitJSONLEvent is a helper to emit standalone JSONL events (for errors and finished events)
+func emitJSONLEvent(event output.JSONLEvent) {
+	formatter := output.NewJSONLFormatter("")
+	formatter.EmitEvent(event)
+}
+
 func execGet(args []string) {
 	getCmd := flag.NewFlagSet("get", flag.ExitOnError)
 	path := getCmd.String("o", ".", "output folder of dowloaded file")
 	inputFile := getCmd.String("i", "", "input file containing a list of urls")
 	proxyURL := getCmd.String("proxy", "", "SOCKS5 proxy URL (e.g., socks5://localhost:1080)")
+	format := getCmd.String("format", "cli", "output format (cli, jsonl)")
 
 	sslOnly := getCmd.Bool("ssl-only", false, "force the client to use TSL connection")
 
@@ -194,16 +296,42 @@ func execGet(args []string) {
 		printGetUsageAndExit(getCmd)
 	}
 
+	// Track transfer results for JSONL finished event
+	var resultsMutex sync.Mutex
+	totalTransfers := 0
+	successful := 0
+	failed := 0
+
 	wg := sync.WaitGroup{}
 	for _, urlStr := range urlList {
 		url, err := xdcc.ParseURL(urlStr)
 		if errors.Is(err, xdcc.ErrInvalidURL) {
-			fmt.Printf("no valid irc url: %s\n", urlStr)
+			if *format == "jsonl" {
+				emitJSONLEvent(output.JSONLEvent{
+					Type:      "error",
+					URL:       urlStr,
+					Error:     "invalid IRC URL",
+					ErrorType: "parse",
+					Fatal:     true,
+				})
+			} else {
+				fmt.Printf("no valid irc url: %s\n", urlStr)
+			}
 			continue
 		}
 
 		if err != nil {
-			fmt.Println(err.Error())
+			if *format == "jsonl" {
+				emitJSONLEvent(output.JSONLEvent{
+					Type:      "error",
+					URL:       urlStr,
+					Error:     err.Error(),
+					ErrorType: "parse",
+					Fatal:     true,
+				})
+			} else {
+				fmt.Println(err.Error())
+			}
 			os.Exit(1)
 		}
 
@@ -213,13 +341,31 @@ func execGet(args []string) {
 			SSLOnly: *sslOnly,
 		})
 
+		totalTransfers++
 		wg.Add(1)
-		go func(transfer xdcc.Transfer) {
-			doTransfer(transfer)
+		go func(transfer xdcc.Transfer, fmt string, urlStr string) {
+			success := doTransfer(transfer, fmt, urlStr)
+			resultsMutex.Lock()
+			if success {
+				successful++
+			} else {
+				failed++
+			}
+			resultsMutex.Unlock()
 			wg.Done()
-		}(transfer)
+		}(transfer, *format, urlStr)
 	}
 	wg.Wait()
+
+	// Emit finished event for JSONL format
+	if *format == "jsonl" {
+		emitJSONLEvent(output.JSONLEvent{
+			Type:           "finished",
+			TotalTransfers: totalTransfers,
+			Successful:     successful,
+			Failed:         failed,
+		})
+	}
 }
 
 func printUsage() {

@@ -117,11 +117,51 @@ func parseCTCPRes(text string) (CTCPResponse, error) {
 
 const defaultEventChanSize = 1024
 
+func (transfer *XdccTransfer) emitConnectingEvent() {
+	transfer.notifyEvent(&TransferConnectingEvent{
+		URL:     transfer.url.String(),
+		Network: transfer.url.Network,
+		Channel: transfer.url.Channel,
+		Bot:     transfer.url.UserName,
+		Slot:    transfer.url.Slot,
+		SSL:     transfer.sslEnabled,
+	})
+}
+
 func (transfer *XdccTransfer) Start() error {
+	transfer.emitConnectingEvent()
+	transfer.startTime = time.Now()
 	return transfer.conn.Connect()
 }
 
 type TransferEvent interface{}
+
+type TransferConnectingEvent struct {
+	URL     string
+	Network string
+	Channel string
+	Bot     string
+	Slot    int
+	SSL     bool
+}
+
+type TransferConnectedEvent struct {
+	URL string
+}
+
+type TransferErrorEvent struct {
+	URL       string
+	Error     string
+	ErrorType string
+	Fatal     bool
+}
+
+type TransferRetryEvent struct {
+	URL         string
+	Attempt     int
+	MaxAttempts int
+	Reason      string
+}
 
 type TransferAbortedEvent struct {
 	Error string
@@ -140,20 +180,24 @@ type retryTransfer struct {
 }
 
 func (t *retryTransfer) Start() error {
-	t1 := newXdccTransfer(t.conf, true, false)
-	if err := t1.conn.Connect(); err == nil {
-		t.XdccTransfer = t1
+	// t.XdccTransfer is already initialized in NewTransfer
+	if err := t.XdccTransfer.Start(); err == nil {
 		return nil
 	}
 
 	t2 := newXdccTransfer(t.conf, true, true)
-	if err := t1.conn.Connect(); err == nil {
-		t.XdccTransfer = t2
+	// Reuse event channel from first transfer
+	t2.events = t.XdccTransfer.events
+	t.XdccTransfer = t2
+	if err := t2.Start(); err == nil {
 		return nil
 	}
 
-	t.XdccTransfer = newXdccTransfer(t.conf, false, false)
-	return t.XdccTransfer.conn.Connect()
+	t3 := newXdccTransfer(t.conf, false, false)
+	// Reuse event channel
+	t3.events = t2.events
+	t.XdccTransfer = t3
+	return t3.Start()
 }
 
 func (t *retryTransfer) PollEvents() chan TransferEvent {
@@ -167,6 +211,8 @@ type XdccTransfer struct {
 	connAttempts int
 	started      bool
 	events       chan TransferEvent
+	sslEnabled   bool
+	startTime    time.Time
 }
 
 type Config struct {
@@ -180,8 +226,10 @@ func NewTransfer(c Config) Transfer {
 		return newXdccTransfer(c, true, false)
 	}
 
+	// Initialize with first transfer so events can be polled
 	return &retryTransfer{
-		conf: c,
+		XdccTransfer: newXdccTransfer(c, true, false),
+		conf:         c,
 	}
 }
 
@@ -210,8 +258,10 @@ func newXdccTransfer(c Config, enableSSL bool, skipCertificateCheck bool) *XdccT
 		started:      false,
 		connAttempts: 0,
 		events:       make(chan TransferEvent, defaultEventChanSize),
+		sslEnabled:   enableSSL,
 	}
 	t.setupHandlers(file.Channel, file.UserName, file.Slot)
+
 	return t
 }
 
@@ -226,11 +276,19 @@ func (transfer *XdccTransfer) setupHandlers(channel string, userName string, slo
 	conn.HandleFunc(irc.CONNECTED,
 		func(conn *irc.Conn, line *irc.Line) {
 			transfer.connAttempts = 0
+			transfer.notifyEvent(&TransferConnectedEvent{
+				URL: transfer.url.String(),
+			})
 			conn.Join(channel)
 		})
 
 	conn.HandleFunc(irc.ERROR, func(conn *irc.Conn, line *irc.Line) {
-
+		transfer.notifyEvent(&TransferErrorEvent{
+			URL:       transfer.url.String(),
+			Error:     line.Text(),
+			ErrorType: "irc",
+			Fatal:     false,
+		})
 	})
 
 	// send xdcc send on successfull join
@@ -258,13 +316,23 @@ func (transfer *XdccTransfer) setupHandlers(channel string, userName string, slo
 			var err error = nil
 
 			if transfer.connAttempts < maxConnAttempts {
+				transfer.notifyEvent(&TransferRetryEvent{
+					URL:         transfer.url.String(),
+					Attempt:     transfer.connAttempts + 1,
+					MaxAttempts: maxConnAttempts,
+					Reason:      "disconnected",
+				})
 				time.Sleep(time.Second)
 
 				err = conn.Connect()
 			}
 
 			if (err != nil || transfer.connAttempts >= maxConnAttempts) && !transfer.started {
-				transfer.notifyEvent(&TransferAbortedEvent{Error: err.Error()})
+				errMsg := "max connection attempts exceeded"
+				if err != nil {
+					errMsg = err.Error()
+				}
+				transfer.notifyEvent(&TransferAbortedEvent{Error: errMsg})
 			}
 
 			transfer.connAttempts++
@@ -285,9 +353,16 @@ const downloadBufSize = 1024
 type TransferStartedEvent struct {
 	FileName string
 	FileSize uint64
+	FilePath string
 }
 
-type TransferCompletedEvent struct{}
+type TransferCompletedEvent struct {
+	FileName string
+	FileSize uint64
+	FilePath string
+	Duration float64
+	AvgRate  float64
+}
 
 func (transfer *XdccTransfer) notifyEvent(e TransferEvent) {
 	select {
@@ -298,20 +373,22 @@ func (transfer *XdccTransfer) notifyEvent(e TransferEvent) {
 }
 
 type SpeedMonitorReader struct {
-	reader       io.Reader
-	elapsedTime  time.Duration
-	currValue    uint64
-	currentSpeed float64
-	onUpdate     func(amount int, speed float64)
+	reader         io.Reader
+	elapsedTime    time.Duration
+	currValue      uint64
+	totalBytesRead uint64
+	currentSpeed   float64
+	onUpdate       func(cumulativeBytes int, speed float64)
 }
 
 func NewSpeedMonitorReader(reader io.Reader, onUpdate func(int, float64)) *SpeedMonitorReader {
 	return &SpeedMonitorReader{
-		reader:       reader,
-		elapsedTime:  time.Duration(0),
-		currValue:    0,
-		currentSpeed: 0,
-		onUpdate:     onUpdate,
+		reader:         reader,
+		elapsedTime:    time.Duration(0),
+		currValue:      0,
+		totalBytesRead: 0,
+		currentSpeed:   0,
+		onUpdate:       onUpdate,
 	}
 }
 
@@ -320,11 +397,12 @@ func (monitor *SpeedMonitorReader) Read(buf []byte) (int, error) {
 	n, err := monitor.reader.Read(buf)
 	elapsedTime := time.Since(now)
 	monitor.currValue += uint64(n)
+	monitor.totalBytesRead += uint64(n)
 	monitor.elapsedTime += elapsedTime
 
 	if monitor.elapsedTime > time.Second {
 		monitor.currentSpeed = float64(monitor.currValue) / monitor.elapsedTime.Seconds()
-		monitor.onUpdate(int(monitor.currValue), monitor.currentSpeed)
+		monitor.onUpdate(int(monitor.totalBytesRead), monitor.currentSpeed)
 		monitor.currValue = 0
 		monitor.elapsedTime = time.Duration(0)
 	}
@@ -341,7 +419,8 @@ func (transfer *XdccTransfer) handleXdccSendRes(send *XdccSendRes) {
 			return
 		}
 
-		file, err := os.OpenFile(transfer.filePath+"/"+send.FileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		filePath := transfer.filePath + "/" + send.FileName
+		file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		fileWriter := bufio.NewWriter(file)
 
 		if err != nil {
@@ -349,9 +428,11 @@ func (transfer *XdccTransfer) handleXdccSendRes(send *XdccSendRes) {
 			return
 		}
 
+		downloadStartTime := time.Now()
 		transfer.notifyEvent(&TransferStartedEvent{
 			FileName: send.FileName,
 			FileSize: uint64(send.FileSize),
+			FilePath: filePath,
 		})
 		transfer.started = true
 
@@ -382,7 +463,15 @@ func (transfer *XdccTransfer) handleXdccSendRes(send *XdccSendRes) {
 		}
 		fileWriter.Flush()
 
-		transfer.notifyEvent(&TransferCompletedEvent{})
+		duration := time.Since(downloadStartTime).Seconds()
+		avgRate := float64(send.FileSize) / duration
+		transfer.notifyEvent(&TransferCompletedEvent{
+			FileName: send.FileName,
+			FileSize: uint64(send.FileSize),
+			FilePath: filePath,
+			Duration: duration,
+			AvgRate:  avgRate,
+		})
 	}()
 }
 
