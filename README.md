@@ -77,4 +77,4 @@ export XDCC_PROXY=socks5://localhost:1080
 ## Notes
 
 This software has been written as a development exercise and comes with no warranty. Use it at your own risk.
-Moreover, the developer is not responsible for any illecit use of it.
+Moreover, the developer is not responsible for any illicit use of it.
