@@ -12,8 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
-	"xdcc-cli/pb"
+	"xdcc-cli/cmd/output"
 	"xdcc-cli/proxy"
 	"xdcc-cli/search"
 	table "xdcc-cli/table"
@@ -61,46 +60,6 @@ type JSONSearchResult struct {
 
 type JSONSearchOutput struct {
 	Results []JSONSearchResult `json:"results"`
-}
-
-// JSONL event types for transfer output
-type JSONLEvent struct {
-	Type      string  `json:"type"`
-	URL       string  `json:"url,omitempty"`
-	Timestamp string  `json:"timestamp"`
-
-	// Connecting event fields
-	Network string `json:"network,omitempty"`
-	Channel string `json:"channel,omitempty"`
-	Bot     string `json:"bot,omitempty"`
-	Slot    int    `json:"slot,omitempty"`
-	SSL     bool   `json:"ssl,omitempty"`
-
-	// Started/Progress/Completed event fields
-	FileName          string  `json:"fileName,omitempty"`
-	FileSize          uint64  `json:"fileSize,omitempty"`
-	FilePath          string  `json:"filePath,omitempty"`
-	BytesTransferred  uint64  `json:"bytesTransferred,omitempty"`
-	TotalBytes        uint64  `json:"totalBytes,omitempty"`
-	Percentage        float64 `json:"percentage,omitempty"`
-	TransferRate      float64 `json:"transferRate,omitempty"`
-	Duration          float64 `json:"duration,omitempty"`
-	AvgRate           float64 `json:"avgRate,omitempty"`
-
-	// Error event fields
-	Error     string `json:"error,omitempty"`
-	ErrorType string `json:"errorType,omitempty"`
-	Fatal     bool   `json:"fatal,omitempty"`
-
-	// Retry event fields
-	Attempt     int    `json:"attempt,omitempty"`
-	MaxAttempts int    `json:"maxAttempts,omitempty"`
-	Reason      string `json:"reason,omitempty"`
-
-	// Finished event fields
-	TotalTransfers int `json:"totalTransfers,omitempty"`
-	Successful     int `json:"successful,omitempty"`
-	Failed         int `json:"failed,omitempty"`
 }
 
 func outputSearchResultsJSON(results []search.XdccFileInfo) {
@@ -166,143 +125,42 @@ func execSearch(args []string) {
 	printer.Print()
 }
 
-func emitJSONLEvent(event JSONLEvent) {
-	event.Timestamp = time.Now().UTC().Format(time.RFC3339)
-	jsonBytes, err := json.Marshal(event)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error formatting JSONL: %v\n", err)
-		return
-	}
-	fmt.Println(string(jsonBytes))
-	os.Stdout.Sync() // Flush immediately for streaming
-}
-
-func transferLoopJSONL(transfer xdcc.Transfer, urlStr string) bool {
+// transferLoop runs the main event loop for a transfer using the provided formatter
+func transferLoop(transfer xdcc.Transfer, formatter output.TransferOutputFormatter) bool {
 	evts := transfer.PollEvents()
-	quit := false
 	var totalBytes uint64
 
-	for !quit {
+	for {
 		e := <-evts
-		switch evtType := e.(type) {
+		switch evt := e.(type) {
 		case *xdcc.TransferConnectingEvent:
-			emitJSONLEvent(JSONLEvent{
-				Type:    "connecting",
-				URL:     evtType.URL,
-				Network: evtType.Network,
-				Channel: evtType.Channel,
-				Bot:     evtType.Bot,
-				Slot:    evtType.Slot,
-				SSL:     evtType.SSL,
-			})
+			formatter.OnConnecting(evt)
 
 		case *xdcc.TransferConnectedEvent:
-			emitJSONLEvent(JSONLEvent{
-				Type: "connected",
-				URL:  evtType.URL,
-			})
+			formatter.OnConnected(evt)
 
 		case *xdcc.TransferStartedEvent:
-			totalBytes = evtType.FileSize
-			emitJSONLEvent(JSONLEvent{
-				Type:     "started",
-				URL:      urlStr,
-				FileName: evtType.FileName,
-				FileSize: evtType.FileSize,
-				FilePath: evtType.FilePath,
-			})
+			totalBytes = evt.FileSize
+			formatter.OnStarted(evt)
 
 		case *xdcc.TransferProgessEvent:
-			percentage := 0.0
-			if totalBytes > 0 {
-				percentage = (float64(evtType.TransferBytes) / float64(totalBytes)) * 100.0
-			}
-			emitJSONLEvent(JSONLEvent{
-				Type:             "progress",
-				URL:              urlStr,
-				BytesTransferred: evtType.TransferBytes,
-				TotalBytes:       totalBytes,
-				Percentage:       percentage,
-				TransferRate:     float64(evtType.TransferRate),
-			})
+			formatter.OnProgress(evt, totalBytes)
 
 		case *xdcc.TransferCompletedEvent:
-			emitJSONLEvent(JSONLEvent{
-				Type:     "completed",
-				URL:      urlStr,
-				FileName: evtType.FileName,
-				FileSize: evtType.FileSize,
-				FilePath: evtType.FilePath,
-				Duration: evtType.Duration,
-				AvgRate:  evtType.AvgRate,
-			})
-			quit = true
+			formatter.OnCompleted(evt)
 			return true
 
 		case *xdcc.TransferErrorEvent:
-			emitJSONLEvent(JSONLEvent{
-				Type:      "error",
-				URL:       evtType.URL,
-				Error:     evtType.Error,
-				ErrorType: evtType.ErrorType,
-				Fatal:     evtType.Fatal,
-			})
+			formatter.OnError(evt)
 
 		case *xdcc.TransferAbortedEvent:
-			emitJSONLEvent(JSONLEvent{
-				Type:   "aborted",
-				URL:    urlStr,
-				Reason: evtType.Error,
-			})
-			quit = true
+			formatter.OnAborted(evt)
 			return false
 
 		case *xdcc.TransferRetryEvent:
-			emitJSONLEvent(JSONLEvent{
-				Type:        "retry",
-				URL:         evtType.URL,
-				Attempt:     evtType.Attempt,
-				MaxAttempts: evtType.MaxAttempts,
-				Reason:      evtType.Reason,
-			})
+			formatter.OnRetry(evt)
 		}
 	}
-	return false
-}
-
-func transferLoop(transfer xdcc.Transfer, format string) {
-	var bar pb.ProgressBar
-	if format == "cli" {
-		bar = pb.NewProgressBar()
-	}
-
-	evts := transfer.PollEvents()
-	quit := false
-	var previousBytes uint64 = 0
-	for !quit {
-		e := <-evts
-		switch evtType := e.(type) {
-		case *xdcc.TransferStartedEvent:
-			if format == "cli" {
-				bar.SetTotal(int(evtType.FileSize))
-				bar.SetFileName(evtType.FileName)
-				bar.SetState(pb.ProgressStateDownloading)
-			}
-		case *xdcc.TransferProgessEvent:
-			if format == "cli" {
-				// TransferBytes is now cumulative, so calculate the increment
-				increment := evtType.TransferBytes - previousBytes
-				bar.Increment(int(increment))
-				previousBytes = evtType.TransferBytes
-			}
-		case *xdcc.TransferCompletedEvent:
-			if format == "cli" {
-				bar.SetState(pb.ProgressStateCompleted)
-			}
-			quit = true
-		}
-	}
-	// TODO: do clean-up operations here
 }
 
 func suggestUnknownAuthoritySwitch(err error) {
@@ -312,14 +170,22 @@ func suggestUnknownAuthoritySwitch(err error) {
 }
 
 func doTransfer(transfer xdcc.Transfer, format string, urlStr string) bool {
+	// Create the appropriate formatter based on format
+	var formatter output.TransferOutputFormatter
 	if format == "jsonl" {
-		// Start event loop in goroutine before calling Start()
-		// so we can capture connecting event
+		formatter = output.NewJSONLFormatter(urlStr)
+	} else {
+		formatter = output.NewCLIFormatter()
+	}
+
+	// For JSONL, start event loop in goroutine before calling Start()
+	// so we can capture connecting event
+	if format == "jsonl" {
 		resultChan := make(chan bool, 1)
 		errChan := make(chan error, 1)
 
 		go func() {
-			resultChan <- transferLoopJSONL(transfer, urlStr)
+			resultChan <- transferLoop(transfer, formatter)
 		}()
 
 		go func() {
@@ -328,8 +194,9 @@ func doTransfer(transfer xdcc.Transfer, format string, urlStr string) bool {
 
 		err := <-errChan
 		if err != nil {
-			emitJSONLEvent(JSONLEvent{
-				Type:      "error",
+			// Emit error using JSONL formatter
+			jsonlFormatter := formatter.(*output.JSONLFormatter)
+			jsonlFormatter.OnError(&xdcc.TransferErrorEvent{
 				URL:       urlStr,
 				Error:     err.Error(),
 				ErrorType: "network",
@@ -341,6 +208,7 @@ func doTransfer(transfer xdcc.Transfer, format string, urlStr string) bool {
 		return <-resultChan
 	}
 
+	// For CLI format, start transfer first
 	err := transfer.Start()
 	if err != nil {
 		fmt.Println(err)
@@ -348,8 +216,7 @@ func doTransfer(transfer xdcc.Transfer, format string, urlStr string) bool {
 		return false
 	}
 
-	transferLoop(transfer, format)
-	return true
+	return transferLoop(transfer, formatter)
 }
 
 func parseFlags(flagSet *flag.FlagSet, args []string) []string {
@@ -399,6 +266,12 @@ func printGetUsageAndExit(flagSet *flag.FlagSet) {
 	os.Exit(0)
 }
 
+// emitJSONLEvent is a helper to emit standalone JSONL events (for errors and finished events)
+func emitJSONLEvent(event output.JSONLEvent) {
+	formatter := output.NewJSONLFormatter("")
+	formatter.EmitEvent(event)
+}
+
 func execGet(args []string) {
 	getCmd := flag.NewFlagSet("get", flag.ExitOnError)
 	path := getCmd.String("o", ".", "output folder of dowloaded file")
@@ -434,7 +307,7 @@ func execGet(args []string) {
 		url, err := xdcc.ParseURL(urlStr)
 		if errors.Is(err, xdcc.ErrInvalidURL) {
 			if *format == "jsonl" {
-				emitJSONLEvent(JSONLEvent{
+				emitJSONLEvent(output.JSONLEvent{
 					Type:      "error",
 					URL:       urlStr,
 					Error:     "invalid IRC URL",
@@ -449,7 +322,7 @@ func execGet(args []string) {
 
 		if err != nil {
 			if *format == "jsonl" {
-				emitJSONLEvent(JSONLEvent{
+				emitJSONLEvent(output.JSONLEvent{
 					Type:      "error",
 					URL:       urlStr,
 					Error:     err.Error(),
@@ -486,7 +359,7 @@ func execGet(args []string) {
 
 	// Emit finished event for JSONL format
 	if *format == "jsonl" {
-		emitJSONLEvent(JSONLEvent{
+		emitJSONLEvent(output.JSONLEvent{
 			Type:           "finished",
 			TotalTransfers: totalTransfers,
 			Successful:     successful,
