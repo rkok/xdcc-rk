@@ -222,19 +222,34 @@ func execGet(args []string) {
 	wg.Wait()
 }
 
+func printUsage() {
+	fmt.Println("Usage: xdcc <command> [arguments]")
+	fmt.Println()
+	fmt.Println("Available commands:")
+	fmt.Println("  search    Search for files on IRC XDCC networks")
+	fmt.Println("  get       Download files from IRC XDCC networks")
+	fmt.Println()
+	fmt.Println("Use 'xdcc <command> --help' for more information about a command.")
+}
+
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("one of the following subcommands is expected: [search, get]")
+		printUsage()
 		os.Exit(1)
 	}
 
 	switch os.Args[1] {
+	case "--help", "-h", "help":
+		printUsage()
+		os.Exit(0)
 	case "search":
 		execSearch(os.Args[2:])
 	case "get":
 		execGet(os.Args[2:])
 	default:
 		fmt.Println("no such command: ", os.Args[1])
+		fmt.Println()
+		printUsage()
 		os.Exit(1)
 	}
 }

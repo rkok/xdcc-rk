@@ -26,6 +26,12 @@ make # this will ouput a bin/xdcc executable
 ```
 
 ## Usage
+
+For a list of available commands, run:
+```bash
+foo@bar:~$ xdcc --help
+```
+
 To initialize a file search, simply pass a list of keywords to the **search** subcommand like so:
 
 ```bash
