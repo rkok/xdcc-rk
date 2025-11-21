@@ -34,6 +34,18 @@ const formatFileSize = (sizeInKB: number): string => {
   return `${size.toFixed(2)} ${units[unitIndex]}`;
 }
 
+const extractHostname = (ircUrl: string): string => {
+  try {
+    // IRC URL format: irc://hostname/channel/bot/slot
+    const url = new URL(ircUrl);
+    return url.hostname;
+  } catch (err) {
+    // If URL parsing fails, try to extract manually
+    const match = ircUrl.match(/^irc:\/\/([^\/]+)/);
+    return match ? match[1] : '';
+  }
+}
+
 const Xdcc = ({}: XdccProps) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResponse | null>(null);
@@ -207,6 +219,7 @@ const Xdcc = ({}: XdccProps) => {
               <tr>
                 <th>File Name</th>
                 <th>Size</th>
+                <th>Server</th>
                 <th>Action</th>
               </tr>
             </thead>
@@ -214,10 +227,12 @@ const Xdcc = ({}: XdccProps) => {
               {searchResults.results.map((result, index) => {
                 const downloadState = downloads[result.url];
                 const isDownloading = eventSources[result.url] !== undefined;
+                const hostname = extractHostname(result.url);
                 return (
                   <tr key={index}>
-                    <td>{result.fileName}</td>
-                    <td>{formatFileSize(result.size)}</td>
+                    <td title={result.url}>{result.fileName}</td>
+                    <td title={result.url}>{formatFileSize(result.size)}</td>
+                    <td title={result.url}>{hostname}</td>
                     <td>
                       {downloadState ? (
                         <div>
