@@ -125,8 +125,11 @@ func execSearch(args []string) {
 	printer.Print()
 }
 
-func transferLoop(transfer xdcc.Transfer) {
-	bar := pb.NewProgressBar()
+func transferLoop(transfer xdcc.Transfer, format string) {
+	var bar pb.ProgressBar
+	if format == "cli" {
+		bar = pb.NewProgressBar()
+	}
 
 	evts := transfer.PollEvents()
 	quit := false
@@ -134,13 +137,19 @@ func transferLoop(transfer xdcc.Transfer) {
 		e := <-evts
 		switch evtType := e.(type) {
 		case *xdcc.TransferStartedEvent:
-			bar.SetTotal(int(evtType.FileSize))
-			bar.SetFileName(evtType.FileName)
-			bar.SetState(pb.ProgressStateDownloading)
+			if format == "cli" {
+				bar.SetTotal(int(evtType.FileSize))
+				bar.SetFileName(evtType.FileName)
+				bar.SetState(pb.ProgressStateDownloading)
+			}
 		case *xdcc.TransferProgessEvent:
-			bar.Increment(int(evtType.TransferBytes))
+			if format == "cli" {
+				bar.Increment(int(evtType.TransferBytes))
+			}
 		case *xdcc.TransferCompletedEvent:
-			bar.SetState(pb.ProgressStateCompleted)
+			if format == "cli" {
+				bar.SetState(pb.ProgressStateCompleted)
+			}
 			quit = true
 		}
 	}
@@ -153,7 +162,7 @@ func suggestUnknownAuthoritySwitch(err error) {
 	}
 }
 
-func doTransfer(transfer xdcc.Transfer) {
+func doTransfer(transfer xdcc.Transfer, format string) {
 	err := transfer.Start()
 	if err != nil {
 		fmt.Println(err)
@@ -161,7 +170,7 @@ func doTransfer(transfer xdcc.Transfer) {
 		return
 	}
 
-	transferLoop(transfer)
+	transferLoop(transfer, format)
 }
 
 func parseFlags(flagSet *flag.FlagSet, args []string) []string {
@@ -216,6 +225,7 @@ func execGet(args []string) {
 	path := getCmd.String("o", ".", "output folder of dowloaded file")
 	inputFile := getCmd.String("i", "", "input file containing a list of urls")
 	proxyURL := getCmd.String("proxy", "", "SOCKS5 proxy URL (e.g., socks5://localhost:1080)")
+	format := getCmd.String("format", "cli", "output format (cli)")
 
 	sslOnly := getCmd.Bool("ssl-only", false, "force the client to use TSL connection")
 
@@ -254,10 +264,10 @@ func execGet(args []string) {
 		})
 
 		wg.Add(1)
-		go func(transfer xdcc.Transfer) {
-			doTransfer(transfer)
+		go func(transfer xdcc.Transfer, fmt string) {
+			doTransfer(transfer, fmt)
 			wg.Done()
-		}(transfer)
+		}(transfer, *format)
 	}
 	wg.Wait()
 }
