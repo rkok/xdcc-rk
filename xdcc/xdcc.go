@@ -2,6 +2,7 @@ package xdcc
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"xdcc-cli/proxy"
 
 	irc "github.com/fluffle/goirc/client"
 )
@@ -196,6 +198,8 @@ func newXdccTransfer(c Config, enableSSL bool, skipCertificateCheck bool) *XdccT
 	config.NewNick = func(nick string) string {
 		return nick + "" + strconv.Itoa(int(rand.Uint32()))
 	}
+	// Set proxy if configured
+	config.Proxy = proxy.ProxyURL()
 
 	conn := irc.Client(config)
 
@@ -329,7 +333,9 @@ func (monitor *SpeedMonitorReader) Read(buf []byte) (int, error) {
 
 func (transfer *XdccTransfer) handleXdccSendRes(send *XdccSendRes) {
 	go func() {
-		conn, err := net.DialTCP("tcp", nil, &net.TCPAddr{IP: send.IP, Port: send.Port})
+		// Use proxy-aware dialer for file transfer
+		address := fmt.Sprintf("%s:%d", send.IP.String(), send.Port)
+		conn, err := proxy.DialContext(context.Background(), "tcp", address)
 		if err != nil {
 			log.Fatalf("unable to reach host %s:%d", send.IP.String(), send.Port)
 			return

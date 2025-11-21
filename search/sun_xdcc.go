@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"xdcc-cli/proxy"
 )
 
 const (
@@ -53,7 +54,7 @@ func (p *SunXdccProvider) Search(keywords []string) ([]XdccFileInfo, error) {
 	keywordString := strings.Join(keywords, " ")
 	searchkey := strings.Join(strings.Fields(keywordString), "+")
 	// see https://sunxdcc.com/#api for API definition
-	httpResp, err := http.Get(sunXdccURL + "?sterm=" + searchkey)
+	httpResp, err := proxy.HTTPClient().Get(sunXdccURL + "?sterm=" + searchkey)
 	if err != nil {
 		return nil, err
 	}

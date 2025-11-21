@@ -6,11 +6,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"xdcc-cli/pb"
+	"xdcc-cli/proxy"
 	"xdcc-cli/search"
 	table "xdcc-cli/table"
 	xdcc "xdcc-cli/xdcc"
@@ -52,8 +54,14 @@ func formatSize(size int64) string {
 func execSearch(args []string) {
 	searchCmd := flag.NewFlagSet("search", flag.ExitOnError)
 	sortByFilename := searchCmd.Bool("s", false, "sort results by filename")
+	proxyURL := searchCmd.String("proxy", "", "SOCKS5 proxy URL (e.g., socks5://localhost:1080)")
 
 	args = parseFlags(searchCmd, args)
+
+	// Initialize proxy
+	if err := proxy.Initialize(*proxyURL); err != nil {
+		log.Fatalf("Failed to initialize proxy: %v\n", err)
+	}
 
 	printer := table.NewTablePrinter([]string{"File Name", "Size", "URL"})
 	printer.SetMaxWidths(defaultColWidths)
@@ -158,7 +166,7 @@ func loadUrlListFile(filePath string) []string {
 }
 
 func printGetUsageAndExit(flagSet *flag.FlagSet) {
-	fmt.Printf("usage: get url1 url2 ... [-o path] [-i file] [--ssl-only]\n\nFlag set:\n")
+	fmt.Printf("usage: get url1 url2 ... [-o path] [-i file] [--ssl-only] [--proxy url]\n\nFlag set:\n")
 	flagSet.PrintDefaults()
 	os.Exit(0)
 }
@@ -167,10 +175,16 @@ func execGet(args []string) {
 	getCmd := flag.NewFlagSet("get", flag.ExitOnError)
 	path := getCmd.String("o", ".", "output folder of dowloaded file")
 	inputFile := getCmd.String("i", "", "input file containing a list of urls")
+	proxyURL := getCmd.String("proxy", "", "SOCKS5 proxy URL (e.g., socks5://localhost:1080)")
 
 	sslOnly := getCmd.Bool("ssl-only", false, "force the client to use TSL connection")
 
 	urlList := parseFlags(getCmd, args)
+
+	// Initialize proxy
+	if err := proxy.Initialize(*proxyURL); err != nil {
+		log.Fatalf("Failed to initialize proxy: %v\n", err)
+	}
 
 	if *inputFile != "" {
 		urlList = append(urlList, loadUrlListFile(*inputFile)...)

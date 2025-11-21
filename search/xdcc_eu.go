@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"xdcc-cli/proxy"
 	"xdcc-cli/xdcc"
 
 	"github.com/PuerkitoBio/goquery"
@@ -46,7 +47,7 @@ func (p *XdccEuProvider) parseFields(fields []string) (*XdccFileInfo, error) {
 func (p *XdccEuProvider) Search(keywords []string) ([]XdccFileInfo, error) {
 	keywordString := strings.Join(keywords, " ")
 	searchkey := strings.Join(strings.Fields(keywordString), "+")
-	res, err := http.Get(xdccEuURL + "?searchkey=" + searchkey)
+	res, err := proxy.HTTPClient().Get(xdccEuURL + "?searchkey=" + searchkey)
 	if err != nil {
 		return nil, err
 	}

@@ -53,6 +53,21 @@ foo@bar:~$ xdcc get url1 url2 ... [-o /path/to/an/output/directory]
 ```
 Alternatively, you could also specify a .txt input file, containing a list of urls (one for each line), using the **-i** switch.
 
+## Proxy Support
+
+Both `search` and `get` commands support SOCKS5 proxies for network connections:
+
+```bash
+foo@bar:~$ xdcc search ubuntu iso --proxy socks5://localhost:1080
+foo@bar:~$ xdcc get url1 url2 --proxy socks5://user:pass@localhost:1080
+```
+
+Alternatively, set the `XDCC_PROXY` or `ALL_PROXY` environment variable:
+
+```bash
+export XDCC_PROXY=socks5://localhost:1080
+```
+
 ## Notes
 
 This software has been written as a development exercise and comes with no warranty. Use it at your own risk.
