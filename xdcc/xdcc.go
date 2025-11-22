@@ -428,7 +428,7 @@ func (transfer *XdccTransfer) handleXdccSendRes(send *XdccSendRes) {
 		}
 
 		filePath := transfer.filePath + "/" + filename
-		file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0644)
 		fileWriter := bufio.NewWriter(file)
 
 		if err != nil {
