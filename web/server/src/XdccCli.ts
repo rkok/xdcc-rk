@@ -116,7 +116,9 @@ class XdccCli {
    * @returns The spawned child process
    */
   spawnDownload(url: string): ChildProcess {
-    const args = ['get', url, '--format', 'jsonl', '-o', this.resolveDownloadsPath(), '--sanitize-filenames'];
+    const args = ['get', url, '--format', 'jsonl',
+      '-o', this.resolveDownloadsPath(), '--sanitize-filenames',
+      '--ssl-only'];
     return spawn(this.binaryPath, args);
   }
 }
