@@ -278,6 +278,7 @@ func execGet(args []string) {
 	inputFile := getCmd.String("i", "", "input file containing a list of urls")
 	proxyURL := getCmd.String("proxy", "", "SOCKS5 proxy URL (e.g., socks5://localhost:1080)")
 	format := getCmd.String("format", "cli", "output format (cli, jsonl)")
+	sanitizeFilenames := getCmd.Bool("sanitize-filenames", false, "sanitize filenames to ASCII-only safe characters")
 
 	sslOnly := getCmd.Bool("ssl-only", false, "force the client to use TSL connection")
 
@@ -336,9 +337,10 @@ func execGet(args []string) {
 		}
 
 		transfer := xdcc.NewTransfer(xdcc.Config{
-			File:    *url,
-			OutPath: *path,
-			SSLOnly: *sslOnly,
+			File:              *url,
+			OutPath:           *path,
+			SSLOnly:           *sslOnly,
+			SanitizeFilenames: *sanitizeFilenames,
 		})
 
 		totalTransfers++

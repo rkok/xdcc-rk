@@ -205,20 +205,22 @@ func (t *retryTransfer) PollEvents() chan TransferEvent {
 }
 
 type XdccTransfer struct {
-	filePath     string
-	url          IRCFile
-	conn         *irc.Conn
-	connAttempts int
-	started      bool
-	events       chan TransferEvent
-	sslEnabled   bool
-	startTime    time.Time
+	filePath          string
+	url               IRCFile
+	conn              *irc.Conn
+	connAttempts      int
+	started           bool
+	events            chan TransferEvent
+	sslEnabled        bool
+	startTime         time.Time
+	sanitizeFilenames bool
 }
 
 type Config struct {
-	File    IRCFile
-	OutPath string
-	SSLOnly bool
+	File              IRCFile
+	OutPath           string
+	SSLOnly           bool
+	SanitizeFilenames bool
 }
 
 func NewTransfer(c Config) Transfer {
@@ -252,13 +254,14 @@ func newXdccTransfer(c Config, enableSSL bool, skipCertificateCheck bool) *XdccT
 	conn := irc.Client(config)
 
 	t := &XdccTransfer{
-		conn:         conn,
-		url:          file,
-		filePath:     c.OutPath,
-		started:      false,
-		connAttempts: 0,
-		events:       make(chan TransferEvent, defaultEventChanSize),
-		sslEnabled:   enableSSL,
+		conn:              conn,
+		url:               file,
+		filePath:          c.OutPath,
+		started:           false,
+		connAttempts:      0,
+		events:            make(chan TransferEvent, defaultEventChanSize),
+		sslEnabled:        enableSSL,
+		sanitizeFilenames: c.SanitizeFilenames,
 	}
 	t.setupHandlers(file.Channel, file.UserName, file.Slot)
 
@@ -419,7 +422,12 @@ func (transfer *XdccTransfer) handleXdccSendRes(send *XdccSendRes) {
 			return
 		}
 
-		filePath := transfer.filePath + "/" + send.FileName
+		filename := send.FileName
+		if transfer.sanitizeFilenames {
+			filename = SanitizeFilename(filename)
+		}
+
+		filePath := transfer.filePath + "/" + filename
 		file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		fileWriter := bufio.NewWriter(file)
 
@@ -430,7 +438,7 @@ func (transfer *XdccTransfer) handleXdccSendRes(send *XdccSendRes) {
 
 		downloadStartTime := time.Now()
 		transfer.notifyEvent(&TransferStartedEvent{
-			FileName: send.FileName,
+			FileName: filename,
 			FileSize: uint64(send.FileSize),
 			FilePath: filePath,
 		})
@@ -466,7 +474,7 @@ func (transfer *XdccTransfer) handleXdccSendRes(send *XdccSendRes) {
 		duration := time.Since(downloadStartTime).Seconds()
 		avgRate := float64(send.FileSize) / duration
 		transfer.notifyEvent(&TransferCompletedEvent{
-			FileName: send.FileName,
+			FileName: filename,
 			FileSize: uint64(send.FileSize),
 			FilePath: filePath,
 			Duration: duration,

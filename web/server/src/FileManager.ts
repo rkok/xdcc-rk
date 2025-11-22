@@ -116,9 +116,8 @@ class FileManager {
       throw new Error('Filename cannot be empty');
     }
 
-    // Reject filenames with path separators
-    if (filename.includes('/') || filename.includes('\\') || filename.includes(sep)) {
-      throw new Error('Filename cannot contain path separators');
+    if (!/^[\w,\s()@\[\].-]+$/.test(filename)) {
+      throw new Error('Filename contains invalid characters');
     }
 
     // Reject filenames with path traversal attempts
