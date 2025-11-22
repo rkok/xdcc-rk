@@ -1,6 +1,10 @@
 package xdcc
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestSanitizeFilename(t *testing.T) {
 	tests := []struct {
@@ -110,3 +114,65 @@ func TestSanitizeFilename(t *testing.T) {
 	}
 }
 
+func TestGetUniqueFilePath(t *testing.T) {
+	// Create a temporary directory for testing
+	tmpDir, err := os.MkdirTemp("", "xdcc-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Test 1: File doesn't exist - should return original path
+	testPath := filepath.Join(tmpDir, "testfile.mp3")
+	result := GetUniqueFilePath(testPath)
+	if result != testPath {
+		t.Errorf("Expected %s, got %s", testPath, result)
+	}
+
+	// Test 2: File exists - should return path with -1 suffix
+	// Create the file
+	if err := os.WriteFile(testPath, []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	expectedPath := filepath.Join(tmpDir, "testfile-1.mp3")
+	result = GetUniqueFilePath(testPath)
+	if result != expectedPath {
+		t.Errorf("Expected %s, got %s", expectedPath, result)
+	}
+
+	// Test 3: Both original and -1 exist - should return -2
+	if err := os.WriteFile(expectedPath, []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	expectedPath2 := filepath.Join(tmpDir, "testfile-2.mp3")
+	result = GetUniqueFilePath(testPath)
+	if result != expectedPath2 {
+		t.Errorf("Expected %s, got %s", expectedPath2, result)
+	}
+
+	// Test 4: File without extension
+	testPathNoExt := filepath.Join(tmpDir, "README")
+	if err := os.WriteFile(testPathNoExt, []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	expectedNoExt := filepath.Join(tmpDir, "README-1")
+	result = GetUniqueFilePath(testPathNoExt)
+	if result != expectedNoExt {
+		t.Errorf("Expected %s, got %s", expectedNoExt, result)
+	}
+
+	// Test 5: File with multiple dots in name
+	testPathMultiDot := filepath.Join(tmpDir, "archive.tar.gz")
+	if err := os.WriteFile(testPathMultiDot, []byte("test"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	expectedMultiDot := filepath.Join(tmpDir, "archive.tar-1.gz")
+	result = GetUniqueFilePath(testPathMultiDot)
+	if result != expectedMultiDot {
+		t.Errorf("Expected %s, got %s", expectedMultiDot, result)
+	}
+}

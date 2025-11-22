@@ -1,6 +1,9 @@
 package xdcc
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"unicode"
 
@@ -64,3 +67,28 @@ func SanitizeFilename(filename string) string {
 	return sanitized
 }
 
+// GetUniqueFilePath returns a unique file path by adding a numeric suffix if the file exists.
+// Examples:
+//   file.mp3 -> file.mp3 (if doesn't exist)
+//   file.mp3 -> file-1.mp3 (if file.mp3 exists)
+//   file.mp3 -> file-2.mp3 (if file.mp3 and file-1.mp3 exist)
+func GetUniqueFilePath(basePath string) string {
+	// Check if the original path is available
+	if _, err := os.Stat(basePath); os.IsNotExist(err) {
+		return basePath
+	}
+
+	// Split into directory, name, and extension
+	dir := filepath.Dir(basePath)
+	base := filepath.Base(basePath)
+	ext := filepath.Ext(base)
+	nameWithoutExt := strings.TrimSuffix(base, ext)
+
+	// Try incrementing suffixes until we find an available name
+	for i := 1; ; i++ {
+		newPath := filepath.Join(dir, fmt.Sprintf("%s-%d%s", nameWithoutExt, i, ext))
+		if _, err := os.Stat(newPath); os.IsNotExist(err) {
+			return newPath
+		}
+	}
+}

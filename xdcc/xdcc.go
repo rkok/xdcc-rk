@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -427,7 +428,8 @@ func (transfer *XdccTransfer) handleXdccSendRes(send *XdccSendRes) {
 			filename = SanitizeFilename(filename)
 		}
 
-		filePath := transfer.filePath + "/" + filename
+		filePath := filepath.Join(transfer.filePath, filename)
+		filePath = GetUniqueFilePath(filePath)
 		file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY, 0644)
 		fileWriter := bufio.NewWriter(file)
 
@@ -436,9 +438,12 @@ func (transfer *XdccTransfer) handleXdccSendRes(send *XdccSendRes) {
 			return
 		}
 
+		// Extract the actual filename (may have suffix added)
+		actualFilename := filepath.Base(filePath)
+
 		downloadStartTime := time.Now()
 		transfer.notifyEvent(&TransferStartedEvent{
-			FileName: filename,
+			FileName: actualFilename,
 			FileSize: uint64(send.FileSize),
 			FilePath: filePath,
 		})
@@ -474,7 +479,7 @@ func (transfer *XdccTransfer) handleXdccSendRes(send *XdccSendRes) {
 		duration := time.Since(downloadStartTime).Seconds()
 		avgRate := float64(send.FileSize) / duration
 		transfer.notifyEvent(&TransferCompletedEvent{
-			FileName: filename,
+			FileName: actualFilename,
 			FileSize: uint64(send.FileSize),
 			FilePath: filePath,
 			Duration: duration,
