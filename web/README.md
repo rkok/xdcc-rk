@@ -82,7 +82,7 @@ The Express server serves:
 ## API Endpoints
 
 - `GET /api/health` - Health check
-- `GET /api/search?searchString=<query>` - Search for files
+- `POST /api/search` - Search for files (body: `{ searchString: string }`)
 - `GET /api/download?url=<irc-url>` - Download file (Server-Sent Events)
 
 ## Environment Variables

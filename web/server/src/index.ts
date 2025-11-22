@@ -24,11 +24,11 @@ async function startServer() {
     res.json({ status: 'ok' });
   });
 
-  app.get('/api/search', async (req, res) => {
-    const searchString = req.query.q;
+  app.post('/api/search', async (req, res) => {
+    const { searchString } = req.body;
 
     if (!searchString || typeof searchString !== 'string') {
-      res.status(400).json({ error: 'searchString query parameter is required' });
+      res.status(400).json({ error: 'searchString is required in request body' });
       return;
     }
 

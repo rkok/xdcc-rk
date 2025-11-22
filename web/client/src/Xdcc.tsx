@@ -69,7 +69,13 @@ const Xdcc = ({}: XdccProps) => {
     setError(null);
 
     try {
-      const response = await fetch(`api/search?q=${encodeURIComponent(searchQuery)}`);
+      const response = await fetch('api/search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ searchString: searchQuery }),
+      });
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
